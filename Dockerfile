@@ -8,4 +8,4 @@ FROM jonoh/nas-plex:v0.0.73
 
 COPY --from=dvr-manager-build /usr/local/cargo/bin/dvr-manager /usr/local/bin/dvr-manager
 
-COPY root/ /
+# COPY root/ /
