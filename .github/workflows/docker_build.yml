@@ -42,7 +42,7 @@ jobs:
           tags: "${{ env.DOCKER_REPO }}/linux/amd64:${{ github.run_number }}"
 
   build_arm64:
-    runs-on: [self-hosted, linux, arm64]
+    runs-on: [self-hosted, linux, ARM64]
     steps:
       - name: Checkout
         uses: actions/checkout@v3
