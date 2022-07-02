@@ -12,8 +12,68 @@ env:
   DOCKER_REPO: ghcr.io/jonohill/docker-nas-plex-dvr
 
 jobs:
-  main:
+
+  build_x64:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to ghcr
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: docker_build
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max          
+          tags: "${{ env.DOCKER_REPO }}/linux/amd64:${{ github.run_number }}"
+
+  build_arm64:
+    runs-on: [self-hosted, linux, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to ghcr
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: docker_build
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max          
+          tags: "${{ env.DOCKER_REPO }}/linux/arm64:${{ github.run_number }}"
+
+  build_final:
+    runs-on: ubuntu-latest
+
+    needs: [build_x64, build_arm64]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -34,21 +94,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set version
-        id: set_version
+      - name: Prepare dockerfile
         run: |
-          H=$(date --utc '+%H')
-          M=$(date --utc '+%M')
-          echo "::set-output name=VERSION::$(date --utc '+%Y.%j').$(expr $H \* 60 + $M)"
+          echo "FROM ${{ env.DOCKER_REPO }}/$TARGETPLATFORM:${{ github.run_number }}" >Dockerfile.multi
 
       - name: Build and push
         id: docker_build
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: ./Dockerfile
+          file: ./Dockerfile.multi
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.ref == 'refs/heads/main' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max          
-          tags: "${{ env.DOCKER_REPO }}:${{ steps.set_version.outputs.VERSION }}"
+          push: true
+          tags: "${{ env.DOCKER_REPO }}:${{ github.run_number }}"
