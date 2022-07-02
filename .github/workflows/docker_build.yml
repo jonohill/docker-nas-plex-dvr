@@ -9,7 +9,7 @@ on:
       - main
 
 env:
-  DOCKER_REPO: ghcr.io/jonohill/docker-nas-plex-dvr
+  DOCKER_REPO: ghcr.io/hillnz/docker-nas-plex-dvr
 
 jobs:
 
