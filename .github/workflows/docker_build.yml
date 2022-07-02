@@ -96,7 +96,7 @@ jobs:
 
       - name: Prepare dockerfile
         run: |
-          echo "ARG TARGETPLATFORM\nFROM ${{ env.DOCKER_REPO }}/$TARGETPLATFORM:${{ github.run_number }}" >Dockerfile.multi
+          echo "ARG TARGETPLATFORM\nFROM ${{ env.DOCKER_REPO }}/\${TARGETPLATFORM}:${{ github.run_number }}" >Dockerfile.multi
 
       - name: Build and push
         id: docker_build
