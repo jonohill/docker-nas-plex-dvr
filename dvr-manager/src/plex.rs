@@ -1,11 +1,10 @@
-use chrono::{DateTime, Utc, TimeZone};
-use derive_builder::Builder;
-use reqwest::RequestBuilder;
-use serde::{Deserialize, Serialize};
-use serde_xml_rs::from_str;
-use tokio::sync::Semaphore;
-use std::{future::Future, sync::Arc, ops::Deref};
 use async_trait::async_trait;
+use chrono::{DateTime, TimeZone, Utc};
+use reqwest::{RequestBuilder};
+use serde::{Deserialize, Serialize, Serializer};
+use serde_xml_rs::from_str;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 const PREFS_PATH: &str = "/config/Library/Application Support/Plex Media Server/Preferences.xml";
 
@@ -39,26 +38,26 @@ pub struct TemplateParameters {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all="camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct TemplateSetting {
     id: String,
-    default: String
+    default: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TemplateSubscription<T> {
     pub parameters: T,
-    pub r#type: i16,
-    #[serde(rename="targetSectionLocationID")]
-    pub target_section_location_id: i16,
-    #[serde(rename="Setting")]
-    pub setting: Vec<TemplateSetting>
+    pub r#type: i64,
+    #[serde(rename = "targetSectionLocationID")]
+    pub target_section_location_id: Option<i16>,
+    #[serde(rename = "Setting")]
+    pub setting: Vec<TemplateSetting>,
 }
 
 impl<T> TemplateSubscription<T> {
-
     pub fn setting_default(&self, id: &str) -> Result<String> {
-        let val = self.setting
+        let val = self
+            .setting
             .iter()
             .find(|s| s.id == id)
             .ok_or_else(|| PlexError::PlexResponse(format!("Setting {} not found", id)))?
@@ -66,25 +65,24 @@ impl<T> TemplateSubscription<T> {
             .clone();
         Ok(val)
     }
-
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TemplateTemplate {
     #[serde(rename = "MediaSubscription")]
-    media_subscription: Vec<TemplateSubscription<String>>
+    media_subscription: Vec<TemplateSubscription<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TemplateContainer {
     #[serde(rename = "SubscriptionTemplate")]
-    subscription_template: Vec<TemplateTemplate>
+    subscription_template: Vec<TemplateTemplate>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TemplateResponse {
     #[serde(rename = "MediaContainer")]
-    media_container: TemplateContainer
+    media_container: TemplateContainer,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -137,7 +135,6 @@ impl From<GridMetadataType> for u8 {
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GridMetadata {
@@ -160,7 +157,7 @@ pub struct GridMetadata {
     pub grandparent_subscription_id: Option<String>,
     pub grandparent_subscription_type: Option<String>,
     pub grandparent_thumb: Option<String>,
-    pub originally_available_at: String,
+    pub originally_available_at: Option<String>,
     #[serde(rename = "Media")]
     pub media: Vec<GridMedia>,
 }
@@ -169,7 +166,7 @@ impl GridMetadata {
     pub fn begins_at_ts(&self) -> i64 {
         self.media.first().map_or(0, |m| m.begins_at)
     }
-    
+
     pub fn begins_at(&self) -> Option<DateTime<Utc>> {
         self.media.first().map(|m| Utc.timestamp(m.begins_at, 0))
     }
@@ -212,7 +209,7 @@ pub struct ProvidersFeature {
     key: Option<String>,
     r#type: String,
     #[serde(rename = "Directory")]
-    directory: Option<Vec<ProviderDirectory>>
+    directory: Option<Vec<ProviderDirectory>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -228,15 +225,21 @@ pub struct ProvidersMediaProvider {
 #[serde(rename_all = "camelCase")]
 pub struct ProvidersContainer {
     #[serde(rename = "MediaProvider")]
-    media_provider: Vec<ProvidersMediaProvider>
+    media_provider: Vec<ProvidersMediaProvider>,
 }
 
 pub trait ProvidersMediaProviders {
-    fn get_dirs_of_type(&self, dir_type: ProviderDirectoryType) -> Result<Vec<ProviderDirectory>, PlexError>;
+    fn get_dirs_of_type(
+        &self,
+        dir_type: ProviderDirectoryType,
+    ) -> Result<Vec<ProviderDirectory>, PlexError>;
 }
 
 impl ProvidersMediaProviders for Vec<ProvidersMediaProvider> {
-    fn get_dirs_of_type(&self, dir_type: ProviderDirectoryType) -> Result<Vec<ProviderDirectory>, PlexError> {
+    fn get_dirs_of_type(
+        &self,
+        dir_type: ProviderDirectoryType,
+    ) -> Result<Vec<ProviderDirectory>, PlexError> {
         let dirs = self
             .iter()
             .find(|p| p.identifier == "com.plexapp.plugins.library")
@@ -248,8 +251,7 @@ impl ProvidersMediaProviders for Vec<ProvidersMediaProvider> {
             .directory
             .ok_or_else(|| PlexError::PlexResponse("Plex library has no dirs".into()))?
             .iter()
-            .filter(|d| 
-                d.r#type.clone().map_or(false, |t| t == dir_type))
+            .filter(|d| d.r#type.clone().map_or(false, |t| t == dir_type))
             .cloned()
             .collect::<Vec<_>>();
         Ok(dirs)
@@ -258,8 +260,20 @@ impl ProvidersMediaProviders for Vec<ProvidersMediaProvider> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProvidersResponse {
-    #[serde(rename="MediaContainer")]
-    media_container: ProvidersContainer
+    #[serde(rename = "MediaContainer")]
+    media_container: ProvidersContainer,
+}
+
+fn urlencode<S: Serializer>(x: &str, s: S) -> Result<S::Ok, S::Error> {
+    let encoded = urlencoding::encode(x);
+    s.serialize_str(&encoded)
+}
+
+fn maybe_urlencode<S: Serializer>(x: &Option<String>, s: S) -> Result<S::Ok, S::Error> {
+    match x {
+        Some(ref val) => s.serialize_str(val),
+        None => s.serialize_none()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -281,15 +295,19 @@ pub struct SubscriptionPrefs {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscriptionHints {
+    #[serde(serialize_with = "maybe_urlencode")]
     pub grandparent_guid: Option<String>,
     pub grandparent_thumb: Option<String>,
     pub grandparent_title: Option<String>,
+    #[serde(serialize_with = "urlencode")]
     pub guid: String,
     pub index: Option<String>,
     pub originally_available_at: Option<String>,
+    #[serde(serialize_with = "maybe_urlencode")]
     pub parent_guid: Option<String>,
     pub parent_index: Option<String>,
     pub parent_title: Option<String>,
+    #[serde(serialize_with = "urlencode")]
     pub rating_key: String,
     pub title: String,
     pub r#type: String,
@@ -298,10 +316,11 @@ pub struct SubscriptionHints {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscriptionParams {
+    #[serde(serialize_with = "urlencode")]
     pub airing_channels: String,
     pub airing_times: String,
-    pub library_type: String,      // 2 = tv show?
-    #[serde(rename="mediaProviderID")]
+    pub library_type: String, // 2 = tv show?
+    #[serde(rename = "mediaProviderID")]
     pub media_provider_id: String, // ??
 }
 
@@ -313,19 +332,24 @@ pub struct Subscription {
     pub params: SubscriptionParams,
     #[serde(rename = "targetLibrarySectionID")]
     pub target_library_section_id: String,
-    #[serde(rename = "targetLibraryLocationID")]
-    pub target_library_location_id: String,
+    #[serde(rename = "targetSectionLocationID")]
+    pub target_section_location_id: String,
     pub include_grabs: i8,
+    pub r#type: String,
 }
 
 #[async_trait]
 trait RequestBuilderLimited {
-    async fn send_limited(self, limit: Arc<Semaphore>) -> Result<reqwest::Response, reqwest::Error>;
+    async fn send_limited(self, limit: Arc<Semaphore>)
+        -> Result<reqwest::Response, reqwest::Error>;
 }
 
 #[async_trait]
 impl RequestBuilderLimited for RequestBuilder {
-    async fn send_limited(self, limit: Arc<Semaphore>) -> Result<reqwest::Response, reqwest::Error> {
+    async fn send_limited(
+        self,
+        limit: Arc<Semaphore>,
+    ) -> Result<reqwest::Response, reqwest::Error> {
         let _permit = limit.acquire_owned().await.unwrap();
         self.send().await
     }
@@ -379,17 +403,31 @@ impl Plex {
 
     pub async fn get_providers(&self) -> Result<Vec<ProvidersMediaProvider>> {
         const RESOURCE: &str = "media/providers";
-        let providers: ProvidersResponse = self.get(RESOURCE).send_limited(self.req_limit.clone()).await?.json().await?;
+        let providers: ProvidersResponse = self
+            .get(RESOURCE)
+            .send_limited(self.req_limit.clone())
+            .await?
+            .json()
+            .await?;
         Ok(providers.media_container.media_provider)
     }
 
     pub async fn get_channels(&self) -> Result<Vec<Channel>> {
         const RESOURCE: &str = "tv.plex.providers.epg.xmltv:2/lineups/dvr/channels";
-        let container: ChannelResponse = self.get(RESOURCE).send_limited(self.req_limit.clone()).await?.json().await?;
+        let container: ChannelResponse = self
+            .get(RESOURCE)
+            .send_limited(self.req_limit.clone())
+            .await?
+            .json()
+            .await?;
         Ok(container.media_container.channel)
     }
 
-    pub async fn get_grid(&self, channel_grid_key: &str, date: &str) -> Result<Option<Vec<GridMetadata>>> {
+    pub async fn get_grid(
+        &self,
+        channel_grid_key: &str,
+        date: &str,
+    ) -> Result<Option<Vec<GridMetadata>>> {
         const RESOURCE: &str = "tv.plex.providers.epg.xmltv:2/grid";
         let container: GridResponse = self
             .get(RESOURCE)
@@ -401,28 +439,28 @@ impl Plex {
         Ok(container.media_container.metadata)
     }
 
-    pub async fn get_subscription_template(&self, guid: &str) -> Result<Vec<TemplateSubscription<TemplateParameters>>> {
+    pub async fn get_subscription_template(
+        &self,
+        guid: &str,
+    ) -> Result<Vec<TemplateSubscription<TemplateParameters>>> {
         const RESOURCE: &str = "media/subscriptions/template";
-        
+
         let template_response: TemplateResponse = self
             .get(RESOURCE)
-            // .header("accept", "text/plain") // json not supported
             .query(&[("guid", guid)])
             .send_limited(self.req_limit.clone())
             .await?
             .json()
             .await?;
 
-        // println!("{}", response_text);
-        
-        // let template_response: TemplateResponse = serde_json::from_str(&response_text)?;
-
         template_response
             .media_container
             .subscription_template
             .into_iter()
             .next()
-            .ok_or_else(|| PlexError::PlexResponse("Expected single SubscriptionTemplate body".into()))?
+            .ok_or_else(|| {
+                PlexError::PlexResponse("Expected single SubscriptionTemplate body".into())
+            })?
             .media_subscription
             .into_iter()
             .map(|s| {
@@ -432,7 +470,7 @@ impl Plex {
                     parameters: serde_qs::from_str(&decoded)?,
                     r#type: s.r#type,
                     target_section_location_id: s.target_section_location_id,
-                    setting: s.setting
+                    setting: s.setting,
                 };
                 Ok::<_, PlexError>(ts)
             })
@@ -443,11 +481,18 @@ impl Plex {
         const RESOURCE: &str = "media/subscriptions";
         let query = serde_qs::to_string(subscription).expect("subscription is not serializable");
 
-        self.post(&format!("{}?{}", RESOURCE, query))
+        log::debug!("Send {} to {}", query, RESOURCE);
+
+        let result = self.post(&format!("{}?{}", RESOURCE, query))
             .send_limited(self.req_limit.clone())
             .await?;
 
+        if result.status().is_client_error() {
+            let err = format!("Plex returned an error: {}. Body: {}", result.status(), result.text().await?);
+            log::debug!("{}", err);
+            return Err(PlexError::PlexResponse(err));
+        }
+
         Ok(())
     }
-
 }
