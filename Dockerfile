@@ -1,4 +1,4 @@
-FROM rust:1.62.1 AS dvr-manager-build
+FROM rust:1.84.0 AS dvr-manager-build
 
 WORKDIR /usr/src/app
 COPY dvr-manager .
